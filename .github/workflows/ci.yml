@@ -1,0 +1,47 @@
+name: Canton Fee Estimator CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test:
+    name: Build and Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Daml SDK
+        run: |
+          curl -sSL https://get.daml.com/ | sh -s 3.1.0
+          echo "$HOME/.daml/bin" >> $GITHUB_PATH
+
+      - name: Display Daml version
+        run: daml version
+
+      - name: Install Node dependencies
+        run: npm install
+
+      - name: Build Daml contracts
+        run: daml build
+
+      - name: Test Daml contracts
+        run: daml test
+
+      - name: Build TypeScript CLI and Web App
+        run: npm run build
+        # Assuming a 'build' script in package.json that runs tsc or similar
+
+      - name: Run Linter
+        run: npm run lint
+        # Assuming a 'lint' script in package.json to check code quality
