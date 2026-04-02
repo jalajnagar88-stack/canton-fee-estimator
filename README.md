@@ -1,138 +1,143 @@
 # Canton Fee Estimator
 
-## Overview
+> **Pre-submission transaction cost intelligence for Canton Network developers.**
+> Know what a transaction will cost before you submit it — no surprises in production.
 
-The Canton Fee Estimator is a tool designed to help developers estimate the costs associated with traffic on a Canton network before deploying their Daml contracts to production. It provides insights into per-transaction fees, projected monthly costs based on transaction volume, and optimization suggestions for reducing fees. The tool includes a load simulator that replays realistic transaction patterns against a local Canton DevNet, allowing you to measure actual costs under simulated production conditions.
+[![CI](https://github.com/jalajnagar88-stack/canton-fee-estimator/actions/workflows/ci.yml/badge.svg)](https://github.com/jalajnagar88-stack/canton-fee-estimator/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D16-brightgreen)](https://nodejs.org/)
+
+Canton has no native fee estimation primitive. This tool fills that gap with a CLI analyser,
+a load simulator, and a web calculator — so teams can profile costs against a local DevNet
+before committing to production.
+
+See [`LEARNINGS.md`](LEARNINGS.md) for empirical findings from TestNet testing.
+
+---
 
 ## Features
 
-*   **Fee Estimation:** Calculates approximate fees for individual transactions based on network traffic and participant roles.
-*   **Cost Projection:** Estimates monthly costs based on projected transaction volumes.
-*   **Optimization Suggestions:** Provides recommendations for optimizing Daml contracts and transaction patterns to minimize fees.
-*   **Load Simulation:** Replays transaction patterns against a local Canton DevNet to simulate production load and measure actual costs.
-*   **CLI Interface:** A command-line interface for running simulations and generating reports.
-*   **Web Interface:** A user-friendly web interface for visualizing fee estimates and simulation results.
+- **CLI fee analyser** — estimate per-transaction cost from a scenario JSON file
+- **Load simulator** — replay realistic workloads against a local Canton DevNet
+- **Cost reporter** — ranked breakdown by template, choice, and cost driver
+- **Optimisation suggestions** — detects large observer sets, payload bloat, and batching candidates
+- **Web calculator** — browser UI for interactive estimation without writing code
+- **CI integration** — `--assert-max-cost` flag gates pipelines on cost regression
+
+---
 
 ## Quickstart
 
 ### Prerequisites
 
-*   [Daml SDK](https://docs.daml.com/getting-started/installation.html) (version 3.1.0 or later)
-*   [Node.js](https://nodejs.org/) (version 16 or later)
-*   [Docker](https://www.docker.com/) (optional, for running a local Canton DevNet)
+- [Node.js](https://nodejs.org/) ≥ 16
+- [Daml SDK](https://docs.daml.com/getting-started/installation.html) ≥ 3.1.0 *(required only for simulation against a live DevNet)*
+- [Docker](https://www.docker.com/) *(optional — for spinning up a local Canton DevNet)*
 
-### Installation
+### Install
 
-1.  **Clone the repository:**
+```bash
+git clone https://github.com/jalajnagar88-stack/canton-fee-estimator.git
+cd canton-fee-estimator
+npm install
+```
 
-    ```bash
-    git clone <repository_url>
-    cd canton-fee-estimator
-    ```
+### Run the CLI estimator
 
-2.  **Install dependencies:**
+```bash
+# Quickest path — let the script handle deps and config generation:
+./scripts/estimate.sh
 
-    ```bash
-    npm install
-    ```
+# Or call the CLI directly:
+npx ts-node cli/main.ts estimate scenario.json --dar path/to/contracts.dar --output text
+```
 
-3.  **Build the Daml code:**
+**Scenario file** (`scenario.json`):
+```json
+{
+  "duration": { "value": 60, "unit": "seconds" },
+  "transactions": [
+    { "template": "Iou:Iou", "choice": "Transfer", "payloadSizeBytes": 256,
+      "confirmingParties": ["Alice", "Bob"], "frequencyPerMinute": 120 }
+  ]
+}
+```
 
-    ```bash
-    daml build
-    ```
+Output flags: `--output text` (default) | `--output json` | `--output csv`
 
-4.  **Generate the DAR file:**
+### Run tests
 
-    ```bash
-    daml build
-    ```
+```bash
+npm test              # jest with coverage
+npm run test:watch    # watch mode
+```
 
-### Usage (CLI)
+### Start the web calculator
 
-1.  **Start a local Canton DevNet (optional):**
+```bash
+cd web
+npm install
+npm run dev           # Vite dev server at http://localhost:5173
+```
 
-    You can use Docker to run a local Canton DevNet for testing.  See [Canton documentation](https://docs.canton.io/) for details.
+For a production build:
 
-2.  **Configure the CLI:**
+```bash
+cd web && npm run build   # output in web/dist/
+```
 
-    Create a configuration file (e.g., `config.json`) with the necessary settings, including the Canton endpoint, participant details, and transaction patterns. Example:
-    ```json
-    {
-      "cantonEndpoint": "http://localhost:7575",
-      "participantId": "Participant1",
-      "darPath": "path/to/your/dar/file.dar",
-      "transactionPatterns": [
-        {
-          "contractName": "YourModule:YourContract",
-          "choiceName": "YourChoice",
-          "payload": { "field1": "value1", "field2": 123 },
-          "frequency": 100 // Transactions per minute
-        }
-      ]
-    }
-    ```
+---
 
-3.  **Run the fee estimator:**
+## CLI Reference
 
-    ```bash
-    node cli.js --config config.json --output report.json
-    ```
+```
+Usage: canton-fee-estimator estimate <scenario> [options]
 
-    This command will simulate transactions based on the patterns defined in `config.json` and generate a fee report in `report.json`.
+Positional:
+  scenario          Path to scenario JSON file
 
-### Usage (Web Interface)
+Options:
+  -d, --dar         Path to compiled .dar file          [required]
+  --host            Canton JSON API hostname             [default: localhost]
+  --port            Canton JSON API port                 [default: 7575]
+  --token-file      Path to JWT file for authenticated endpoints
+  -o, --output      Output format: text | json | csv     [default: text]
+  -v, --verbose     Verbose logging
+  -h, --help        Show help
+```
 
-1.  **Start the web server:**
+---
 
-    ```bash
-    npm run start
-    ```
+## Cost Model
 
-2.  **Open the web interface in your browser:**
+See [`docs/FEE_MODEL.md`](docs/FEE_MODEL.md) for a full breakdown of how Canton traffic fees
+are calculated (base cost, submission payload, broadcast fan-out, confirmation overhead).
 
-    Navigate to `http://localhost:3000` (or the port specified in your configuration).
+Key insight from TestNet: **broadcast fan-out accounts for ~71% of total cost** on a typical
+3-party operation. Observer count is the single biggest cost lever — see
+[`docs/OPTIMISATION.md`](docs/OPTIMISATION.md) for patterns.
 
-3.  **Configure the connection:**
+---
 
-    Enter the Canton endpoint and participant details.
+## Project Layout
 
-4.  **Define transaction patterns:**
+```
+.
+├── cli/            TypeScript CLI — analyser, simulator, reporter
+├── web/            Vite + React web calculator
+│   └── src/        EstimatorForm, CostBreakdown, App
+├── tests/          Jest unit tests for CLI modules
+├── docs/           FEE_MODEL.md, OPTIMISATION.md
+├── scripts/        estimate.sh — one-command convenience wrapper
+└── LEARNINGS.md    Empirical findings from Canton TestNet
+```
 
-    Use the web interface to define the transaction patterns you want to simulate.
-
-5.  **Run the simulation:**
-
-    Click the "Run Simulation" button to start the simulation.
-
-6.  **View the results:**
-
-    The web interface will display the estimated fees, projected costs, and optimization suggestions.
-
-## Configuration
-
-The Canton Fee Estimator can be configured using a configuration file or environment variables.  See the `config.example.json` for example configurations. Key configuration options include:
-
-*   `cantonEndpoint`: The URL of the Canton JSON API endpoint.
-*   `participantId`: The ID of the participant executing the transactions.
-*   `darPath`: The path to the Daml archive (DAR) file containing the contract definitions.
-*   `transactionPatterns`: An array of transaction patterns to simulate.
-*   `simulationDuration`: The duration of the simulation in seconds.
-*   `feeRates`:  Allows overriding default fee rates (advanced).
-
-## Optimization Suggestions
-
-The Canton Fee Estimator provides the following optimization suggestions:
-
-*   **Reduce Transaction Volume:**  Identify and eliminate unnecessary transactions.
-*   **Optimize Data Structures:**  Use efficient data structures to reduce the size of transaction payloads.
-*   **Batch Transactions:**  Combine multiple transactions into a single transaction where possible.
-*   **Use Observers:**  Use observers instead of signatories for read-only access to contracts.
+---
 
 ## Contributing
 
-We welcome contributions to the Canton Fee Estimator.  Please see the [CONTRIBUTING.md](CONTRIBUTING.md) file for details on how to contribute.
+Pull requests welcome. Please open an issue first for significant changes.
 
 ## License
 
-This project is licensed under the [Apache 2.0 License](LICENSE).
+[Apache 2.0](LICENSE) — © 2026 Jalaj Nagar
